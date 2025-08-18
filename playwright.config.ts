@@ -2,7 +2,6 @@ import { defineConfig, devices } from '@playwright/test';
 import 'dotenv/config';
 
 export default defineConfig({
-  // test dir
   testDir: './_playwright-tests/',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
