@@ -54,7 +54,7 @@ If using any OS other than Fedora/Rhel (i.e., Mac, Ubuntu Linux):
  podman run -d -e HTTPS_PROXY=$RH_PROXY_URL -p 1337:1337 -v "$(pwd)/config:/config:ro,Z" --replace --name consoledot-testing-proxy quay.io/dvagner/consoledot-testing-proxy
 ```
 
-`npx playwright test` will run the complete playwright test suite.
+`npx playwright test` will run the complete playwright test suite
 
 `npx playwright test --headed` will run the complete suite in a vnc-like browser so you can watch its interactions.
 
