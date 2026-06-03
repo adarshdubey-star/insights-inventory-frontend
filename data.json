@@ -37,15 +37,15 @@
   "quarters": {
     "Q2": {
       "quarter": "Q2",
-      "updated": "2026-06-02",
+      "updated": "2026-06-03",
       "stale": {
-        "period": "2026-04-01 to 2026-06-02",
+        "period": "2026-04-01 to 2026-06-03",
         "data": {
           "total": 0,
           "merged": 0,
           "closed_no_merge": 0,
           "still_open": 0,
-          "bot_closed": 0,
+          "bot_closed": 1,
           "median_ttm": null,
           "median_ttfr": null,
           "avg_ttfr": null,
@@ -55,13 +55,13 @@
         }
       },
       "review": {
-        "period": "2026-04-01 to 2026-06-02",
+        "period": "2026-04-01 to 2026-06-03",
         "data": {
           "total": 0,
           "merged": 0,
           "closed_no_merge": 0,
           "still_open": 0,
-          "bot_closed": 0,
+          "bot_closed": 1,
           "median_ttm": null,
           "median_ttfr": null,
           "avg_ttfr": null,
