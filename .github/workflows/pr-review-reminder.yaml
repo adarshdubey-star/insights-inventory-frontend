@@ -118,18 +118,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Setup gh-pages branch
+      - name: Fetch existing metrics data
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          # Fetch gh-pages if it exists, or create an orphan branch
-          git fetch origin gh-pages:gh-pages 2>/dev/null || true
-          if git rev-parse --verify gh-pages >/dev/null 2>&1; then
-            git checkout gh-pages -- data.json 2>/dev/null || echo '{}' > data.json
-          else
-            echo '{}' > data.json
-          fi
+          gh api "repos/${{ github.repository }}/contents/data.json?ref=gh-pages" \
+            --jq '.content' 2>/dev/null | base64 -d > data.json 2>/dev/null || echo '{}' > data.json
 
       - name: Collect PR metrics
         id: collect
@@ -430,39 +424,67 @@ jobs:
           echo "$EXISTING" | jq . > "$DATA_FILE"
           cp "$DATA_FILE" /tmp/metrics_data.json
 
-      - name: Push to gh-pages branch
+      - name: Push to gh-pages via API
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           TODAY=$(date -u +%Y-%m-%d)
+          REPO="${{ github.repository }}"
+          BRANCH="gh-pages"
 
-          # Switch to gh-pages branch (create orphan if first run)
-          if git rev-parse --verify gh-pages >/dev/null 2>&1; then
-            git checkout gh-pages
-          else
-            git checkout --orphan gh-pages
-            git rm -rf . 2>/dev/null || true
-          fi
-
-          # Move data and index into place
           if [ ! -f /tmp/metrics_data.json ]; then
             echo "Error: /tmp/metrics_data.json not found. Metrics step may have failed."
             exit 1
           fi
-          cp /tmp/metrics_data.json data.json
-          git checkout main -- docs/metrics/index.html 2>/dev/null || git checkout master -- docs/metrics/index.html 2>/dev/null || true
-          if [ -f docs/metrics/index.html ]; then
-            mv docs/metrics/index.html index.html
-            rm -rf docs
+
+          BRANCH_SHA=$(gh api "repos/${REPO}/git/ref/heads/${BRANCH}" --jq '.object.sha' 2>/dev/null || echo "")
+
+          base64 -w0 /tmp/metrics_data.json > /tmp/metrics_b64.txt
+          DATA_BLOB=$(jq -n --rawfile content /tmp/metrics_b64.txt \
+            '{content: $content, encoding: "base64"}' | \
+            gh api "repos/${REPO}/git/blobs" --input - --jq '.sha')
+
+          TREE_JSON=$(jq -n --arg sha "$DATA_BLOB" \
+            '[{path: "data.json", mode: "100644", type: "blob", sha: $sha}]')
+
+          INDEX_SHA=$(gh api "repos/${REPO}/contents/docs/metrics/index.html?ref=main" --jq '.sha' 2>/dev/null || \
+                      gh api "repos/${REPO}/contents/docs/metrics/index.html?ref=master" --jq '.sha' 2>/dev/null || echo "")
+
+          if [ -n "$INDEX_SHA" ]; then
+            TREE_JSON=$(echo "$TREE_JSON" | jq --arg sha "$INDEX_SHA" \
+              '. + [{path: "index.html", mode: "100644", type: "blob", sha: $sha}]')
           fi
 
-          git add data.json
-          [ -f index.html ] && git add index.html
-          git diff --cached --quiet || git commit -m "chore: update PR metrics for ${TODAY}"
+          if [ -n "$BRANCH_SHA" ]; then
+            CURRENT_TREE=$(gh api "repos/${REPO}/git/commits/${BRANCH_SHA}" --jq '.tree.sha')
 
-          for attempt in 1 2 3; do
-            git push origin gh-pages && break
-            echo "Push attempt $attempt failed, retrying in 5s..."
-            git pull --rebase origin gh-pages
-            sleep 5
-            [ "$attempt" -eq 3 ] && exit 1
-          done
+            NEW_TREE=$(jq -n --arg base "$CURRENT_TREE" --argjson tree "$TREE_JSON" \
+              '{base_tree: $base, tree: $tree}' | \
+              gh api "repos/${REPO}/git/trees" --input - --jq '.sha')
+
+            NEW_COMMIT=$(jq -n \
+              --arg msg "chore: update PR metrics for ${TODAY}" \
+              --arg tree "$NEW_TREE" \
+              --arg parent "$BRANCH_SHA" \
+              '{message: $msg, tree: $tree, parents: [$parent]}' | \
+              gh api "repos/${REPO}/git/commits" --input - --jq '.sha')
+
+            gh api "repos/${REPO}/git/refs/heads/${BRANCH}" \
+              -X PATCH -f "sha=${NEW_COMMIT}" --silent
+          else
+            NEW_TREE=$(jq -n --argjson tree "$TREE_JSON" \
+              '{tree: $tree}' | \
+              gh api "repos/${REPO}/git/trees" --input - --jq '.sha')
+
+            NEW_COMMIT=$(jq -n \
+              --arg msg "chore: init PR metrics for ${TODAY}" \
+              --arg tree "$NEW_TREE" \
+              '{message: $msg, tree: $tree, parents: []}' | \
+              gh api "repos/${REPO}/git/commits" --input - --jq '.sha')
+
+            gh api "repos/${REPO}/git/refs" \
+              -f "ref=refs/heads/${BRANCH}" -f "sha=${NEW_COMMIT}" --silent
+          fi
+
+          echo "Pushed metrics to gh-pages via API (verified commit: ${NEW_COMMIT})"
